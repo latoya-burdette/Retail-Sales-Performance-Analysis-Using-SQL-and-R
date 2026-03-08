@@ -1,0 +1,252 @@
+---
+title: "Retail Sales Performance Analysis Using SQL and R"
+author: "LaToya Burdette"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 5
+)
+
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(DBI)
+library(RSQLite)
+library(lubridate)
+library(scales)
+
+theme_set(theme_light())
+```
+## Overview
+
+This project looks at retail sales data using SQL and R. The goal was to better understand revenue trends across customers, products, categories, suppliers, and regions. I imported the data from Excel, loaded it into a SQLite database, queried it with SQL, and visualized the results in R.
+
+
+```{r}
+file_path <- "data/Calculated Field Examples.xlsx"
+
+sales <- read_excel(file_path, sheet = "Sales") %>% clean_names()
+customers <- read_excel(file_path, sheet = "Customers") %>% clean_names()
+products <- read_excel(file_path, sheet = "Product") %>% clean_names()
+suppliers <- read_excel(file_path, sheet = "supplier") %>% clean_names()
+```
+
+
+```{r}
+sales <- sales %>%
+  mutate(
+    date = as.Date(date),
+    revenue = quantity * price * (1 - discount)
+  )
+```
+
+
+
+```{r}
+con <- dbConnect(SQLite(), "retail_database.sqlite")
+
+dbWriteTable(con, "sales", sales, overwrite = TRUE)
+dbWriteTable(con, "customers", customers, overwrite = TRUE)
+dbWriteTable(con, "products", products, overwrite = TRUE)
+dbWriteTable(con, "suppliers", suppliers, overwrite = TRUE)
+```
+
+## Total Revenue
+
+```{r}
+total_revenue <- dbGetQuery(con, "
+SELECT SUM(quantity * price * (1 - discount)) AS total_revenue
+FROM sales
+")
+
+knitr::kable(total_revenue)
+```
+
+## Top 10 Customers by Revenue
+
+```{r}
+top_customers <- dbGetQuery(con, "
+SELECT
+    c.name,
+    SUM(s.quantity * s.price * (1 - s.discount)) AS total_revenue
+FROM sales s
+JOIN customers c
+    ON s.customer_id = c.customer_id
+GROUP BY c.name
+ORDER BY total_revenue DESC
+LIMIT 10
+")
+
+knitr::kable(top_customers)
+```
+
+## Top 10 Products by Revenue
+
+```{r}
+top_products <- dbGetQuery(con, "
+SELECT
+    p.product_name,
+    SUM(s.quantity * s.price * (1 - s.discount)) AS total_revenue
+FROM sales s
+JOIN products p
+    ON s.product_id = p.product_id
+GROUP BY p.product_name
+ORDER BY total_revenue DESC
+LIMIT 10
+")
+
+knitr::kable(top_products)
+```
+
+## Revenue by Category
+
+```{r}
+category_revenue <- dbGetQuery(con, "
+SELECT
+    p.category,
+    SUM(s.quantity * s.price * (1 - s.discount)) AS total_revenue
+FROM sales s
+JOIN products p
+    ON s.product_id = p.product_id
+GROUP BY p.category
+ORDER BY total_revenue DESC
+")
+
+knitr::kable(category_revenue)
+```
+
+## Revenue by Region
+
+```{r}
+region_revenue <- dbGetQuery(con, "
+SELECT
+    c.region,
+    SUM(s.quantity * s.price * (1 - s.discount)) AS total_revenue
+FROM sales s
+JOIN customers c
+    ON s.customer_id = c.customer_id
+GROUP BY c.region
+ORDER BY total_revenue DESC
+")
+
+knitr::kable(region_revenue)
+```
+
+## Supplier Performance
+
+```{r}
+supplier_revenue <- dbGetQuery(con, "
+SELECT
+    sup.supplier_name,
+    SUM(s.quantity * s.price * (1 - s.discount)) AS total_revenue
+FROM sales s
+JOIN products p
+    ON s.product_id = p.product_id
+JOIN suppliers sup
+    ON p.supplier_id = sup.supplier_id
+GROUP BY sup.supplier_name
+ORDER BY total_revenue DESC
+")
+
+knitr::kable(supplier_revenue)
+```
+
+## Monthly Sales Trend
+
+```{r}
+monthly_sales <- sales %>%
+  mutate(month = floor_date(date, "month")) %>%
+  group_by(month) %>%
+  summarise(total_revenue = sum(revenue, na.rm = TRUE), .groups = "drop")
+
+knitr::kable(monthly_sales)
+```
+
+## Visualization: Top Customers
+
+```{r}
+ggplot(top_customers,
+       aes(x = reorder(name, total_revenue),
+           y = total_revenue,
+           fill = name)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set1") +
+  scale_y_continuous(labels = dollar) +
+  labs(
+    title = "Top 10 Customers by Revenue",
+    x = "Customer",
+    y = "Revenue"
+  ) +
+  theme(legend.position = "none")
+```
+
+## Visualization: Top Products
+
+```{r}
+ggplot(top_products,
+       aes(x = reorder(product_name, total_revenue),
+           y = total_revenue,
+           fill = product_name)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set1") +
+  scale_y_continuous(labels = dollar) +
+  labs(
+    title = "Top 10 Products by Revenue",
+    x = "Product",
+    y = "Revenue"
+  ) +
+  theme(legend.position = "none")
+```
+
+## Visualization: Revenue by Category
+
+```{r}
+ggplot(category_revenue,
+       aes(x = reorder(category, total_revenue),
+           y = total_revenue,
+           fill = category)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set1") +
+  scale_y_continuous(labels = dollar) +
+  labs(
+    title = "Revenue by Product Category",
+    x = "Category",
+    y = "Revenue"
+  ) +
+  theme(legend.position = "none")
+```
+
+## Visualization: Monthly Sales Trend
+
+```{r}
+ggplot(monthly_sales, aes(x = month, y = total_revenue, group = 1)) +
+  geom_line(linewidth = 1.2, color = "#FC8D62") +
+  geom_point(size = 2.5, color = "#FC8D62") +
+  scale_y_continuous(labels = dollar) +
+  labs(
+    title = "Monthly Sales Trend",
+    x = "Month",
+    y = "Revenue"
+  ) 
+```
+
+## Key Findings
+
+A small number of customers generate a large share of total revenue. Some products and categories also contribute more to sales than others. When the data is grouped by region, certain regions consistently produce higher revenue. The monthly sales trend shows how revenue changes over time and helps identify periods where sales increase or slow down.
+
+## Conclusion
+
+This project uses SQL and R to analyze retail sales data. SQL was used to join the tables and calculate revenue across customers, products, categories, and regions. R was used to clean the data and create visualizations that make the results easier to see. Overall, the analysis provides a clearer picture of where revenue is coming from and how sales change over time.
+
+```{r}
+dbDisconnect(con)
+```
