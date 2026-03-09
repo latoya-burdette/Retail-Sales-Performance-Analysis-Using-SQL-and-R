@@ -7,8 +7,3 @@ The dataset was imported from Excel, stored in a SQLite database, queried using 
 
 https://latoya-burdette.github.io/Retail-Sales-Performance-Analysis-Using-SQL-and-R/
 
-### Repository contents
-
-- `Retail_Sales_SQL_R_Analysis.Rmd` – R Markdown source code  
-- `index.html` – rendered report  
-- `retail_database.sqlite` – SQLite database used in analysis
